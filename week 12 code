@@ -1,0 +1,112 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+import matplotlib.pyplot as plt
+
+# Define the VAE model
+class VAE(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super(VAE, self).__init__()
+        self.latent_dim = latent_dim
+
+        # Encoder network
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 400),
+            nn.ReLU(),
+            nn.Linear(400, 200),
+            nn.ReLU(),
+            nn.Linear(200, latent_dim * 2)  # mu and log_var
+        )
+
+        # Decoder network
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 200),
+            nn.ReLU(),
+            nn.Linear(200, 400),
+            nn.ReLU(),
+            nn.Linear(400, input_dim),
+            nn.Sigmoid()  # To make the output in the range [0, 1]
+        )
+
+    def encode(self, x):
+        h = self.encoder(x)
+        mu, log_var = h[:, :self.latent_dim], h[:, self.latent_dim:]
+        return mu, log_var
+
+    def reparameterize(self, mu, log_var):
+        std = torch.exp(0.5*log_var)
+        eps = torch.randn_like(std)
+        return mu + eps*std
+
+    def decode(self, z):
+        return self.decoder(z)
+
+    def forward(self, x):
+        mu, log_var = self.encode(x.view(-1, 784))
+        z = self.reparameterize(mu, log_var)
+        return self.decode(z), mu, log_var
+
+# Loss function
+def loss_function(recon_x, x, mu, log_var):
+    # Binary Cross-Entropy loss
+    BCE = nn.functional.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
+
+    # KL divergence loss
+    # KL = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+    # This is the standard form of the KL divergence for VAEs
+    # (sum is over the batch)
+    MSE = torch.sum(mu.pow(2) + log_var.exp() - log_var - 1) * -0.5
+    return BCE + MSE
+
+# Hyperparameters
+batch_size = 128
+epochs = 10
+latent_dim = 20
+lr = 1e-3
+input_dim = 784  # 28x28 images flattened
+
+# Prepare the dataset
+transform = transforms.ToTensor()
+train_data = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+
+# Initialize the VAE model and optimizer
+model = VAE(input_dim=input_dim, latent_dim=latent_dim)
+optimizer = optim.Adam(model.parameters(), lr=lr)
+
+# Training loop
+model.train()
+for epoch in range(epochs):
+    train_loss = 0
+    for batch_idx, (data, _) in enumerate(train_loader):
+        data = data.view(-1, 784)  # Flatten the images
+        optimizer.zero_grad()
+        recon_batch, mu, log_var = model(data)
+        loss = loss_function(recon_batch, data, mu, log_var)
+        loss.backward()
+        train_loss += loss.item()
+        optimizer.step()
+
+    avg_train_loss = train_loss / len(train_loader.dataset)
+    print(f"Epoch {epoch + 1}, Loss: {avg_train_loss:.4f}")
+
+# Save the model
+torch.save(model.state_dict(), 'vae_mnist.pth')
+
+# Sampling and visualization
+def sample_and_plot(model, num_samples=10):
+    with torch.no_grad():
+        z = torch.randn(num_samples, latent_dim)
+        samples = model.decode(z).view(num_samples, 1, 28, 28)
+
+        # Generate a plot with the correct size
+        fig, axes = plt.subplots(1, num_samples, figsize=(num_samples * 1.5, 1.5))
+        for i in range(num_samples):
+            axes[i].imshow(samples[i].squeeze().cpu().numpy(), cmap='gray')
+            axes[i].axis('off')
+        plt.show()
+
+# Generate some samples from the latent space
+sample_and_plot(model)
