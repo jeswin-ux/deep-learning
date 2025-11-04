@@ -1,0 +1,104 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+
+# Step 1: Define the Autoencoder model
+class Autoencoder(nn.Module):
+    def __init__(self):
+        super(Autoencoder, self).__init__()
+        # Encoder: 28x28 (image size) to 128-dimensional latent space
+        self.encoder = nn.Sequential(
+            nn.Linear(28 * 28, 128),
+            nn.ReLU(True),
+            nn.Linear(128, 64),
+            nn.ReLU(True),
+            nn.Linear(64, 32),
+            nn.ReLU(True)
+        )
+        # Decoder: 32-dimensional latent space to 28x28 (image size)
+        self.decoder = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(True),
+            nn.Linear(64, 128),
+            nn.ReLU(True),
+            nn.Linear(128, 28 * 28),
+            nn.Sigmoid()  # To make the output values between 0 and 1
+        )
+
+    def forward(self, x):
+        x = x.view(-1, 28 * 28)  # Flatten the image to 1D vector
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded.view(-1, 1, 28, 28)  # Reshape to image format
+
+# Step 2: Load MNIST dataset
+transform = transforms.ToTensor()
+train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+
+# Step 3: Initialize model, loss function, and optimizer
+model = Autoencoder()
+criterion = nn.MSELoss()  # Mean Squared Error Loss
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Step 4: Train the Autoencoder
+epochs = 10
+train_loss = []
+
+for epoch in range(epochs):
+    running_loss = 0.0
+    for data in train_loader:
+        img, _ = data  # We only care about the images, not labels
+        optimizer.zero_grad()
+
+        # Forward pass
+        reconstructed = model(img)
+
+        # Compute loss
+        loss = criterion(reconstructed, img)
+
+        # Backward pass and optimization
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    avg_loss = running_loss / len(train_loader)
+    train_loss.append(avg_loss)
+    print(f'Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}')
+
+# Step 5: Plot the loss graph
+plt.plot(range(1, epochs + 1), train_loss, marker='o')
+plt.title('Training Loss over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.show()
+
+# Step 6: Visualize some of the original and reconstructed images
+import numpy as np
+
+def plot_reconstructed_images(model, n_images=10):
+    model.eval()
+    with torch.no_grad():
+        test_images, _ = next(iter(train_loader))  # Get a batch of images
+        reconstructed = model(test_images[:n_images])
+
+        # Convert to numpy arrays for visualization
+        test_images = test_images[:n_images].numpy().squeeze()
+        reconstructed = reconstructed.numpy().squeeze()
+
+        # Plot original and reconstructed images
+        fig, axes = plt.subplots(2, n_images, figsize=(12, 4))
+        for i in range(n_images):
+            # Original images
+            axes[0, i].imshow(test_images[i], cmap='gray')
+            axes[0, i].axis('off')
+            # Reconstructed images
+            axes[1, i].imshow(reconstructed[i], cmap='gray')
+            axes[1, i].axis('off')
+        plt.show()
+
+plot_reconstructed_images(model)
