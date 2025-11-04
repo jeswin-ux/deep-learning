@@ -1,0 +1,36 @@
+# ---------------------------------------
+# Understanding Pretrained Model Architecture (Fixed)
+# ---------------------------------------
+import torch
+import torchvision.models as models
+from torchvision.models import ResNet50_Weights
+from torchsummary import summary
+
+# 1. Select device (CPU or GPU)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
+# 2. Load pretrained model with updated API
+model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+
+# 3. Move model to device
+model = model.to(device)
+
+# 4. Print model architecture
+print("\n===== Full Model Architecture =====")
+print(model)
+
+# 5. Print only layer names
+print("\n===== Model Layers =====")
+for name, layer in model.named_children():
+    print(f"{name}: {layer.__class__.__name__}")
+
+# 6. Get layer-wise summary
+print("\n===== Layer-wise Summary =====")
+summary(model, (3, 224, 224), device=str(device))
+
+# 7. Parameter count
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"\nTotal Parameters: {total_params}")
+print(f"Trainable Parameters: {trainable_params}")
