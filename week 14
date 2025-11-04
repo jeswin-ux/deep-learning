@@ -1,0 +1,144 @@
+# ==========================================
+# TRANSFER LEARNING (MobileNetV2) + TRAINING GRAPH
+# ==========================================
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import models, datasets, transforms
+from torch.utils.data import DataLoader, Subset
+import torch.backends.cudnn as cudnn
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# SETTINGS
+# ----------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+cudnn.benchmark = True
+
+num_classes = 10
+batch_size = 64
+epochs = 5
+learning_rate = 0.001
+
+# ----------------------------
+# DATA PREPARATION
+# ----------------------------
+transform = transforms.Compose([
+    transforms.Resize(128),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225])
+])
+
+train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+
+# Optional: subset for faster runs
+subset_size = 5000
+train_dataset = Subset(train_dataset, range(subset_size))
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+# ----------------------------
+# MODEL: Pretrained MobileNetV2
+# ----------------------------
+model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
+for param in model.features.parameters():
+    param.requires_grad = False
+
+in_features = model.classifier[1].in_features
+model.classifier[1] = nn.Linear(in_features, num_classes)
+model = model.to(device)
+
+# ----------------------------
+# LOSS, OPTIMIZER, SCALER
+# ----------------------------
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.classifier[1].parameters(), lr=learning_rate)
+scaler = torch.cuda.amp.GradScaler()
+
+# ----------------------------
+# TRAINING LOOP WITH METRICS
+# ----------------------------
+train_losses, train_accuracies = [], []
+val_losses, val_accuracies = [], []
+
+for epoch in range(epochs):
+    model.train()
+    total, correct, running_loss = 0, 0, 0.0
+
+    for images, labels in train_loader:
+        images, labels = images.to(device), labels.to(device)
+        optimizer.zero_grad()
+        with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+
+        running_loss += loss.item() * images.size(0)
+        _, predicted = outputs.max(1)
+        total += labels.size(0)
+        correct += predicted.eq(labels).sum().item()
+
+    train_loss = running_loss / total
+    train_acc = correct / total
+    train_losses.append(train_loss)
+    train_accuracies.append(train_acc)
+
+    # ---- VALIDATION ----
+    model.eval()
+    val_loss, val_correct, val_total = 0.0, 0, 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            val_loss += loss.item() * images.size(0)
+            _, predicted = outputs.max(1)
+            val_total += labels.size(0)
+            val_correct += predicted.eq(labels).sum().item()
+
+    val_losses.append(val_loss / val_total)
+    val_accuracies.append(val_correct / val_total)
+
+    print(f"Epoch [{epoch+1}/{epochs}] "
+          f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | "
+          f"Val Loss: {val_loss/val_total:.4f} | Val Acc: {val_correct/val_total:.4f}")
+
+# ----------------------------
+# PLOT TRAINING GRAPHS
+# ----------------------------
+plt.figure(figsize=(12, 5))
+
+# Plot Loss
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Train Loss', marker='o')
+plt.plot(val_losses, label='Validation Loss', marker='o')
+plt.title('Loss per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+
+# Plot Accuracy
+plt.subplot(1, 2, 2)
+plt.plot(train_accuracies, label='Train Accuracy', marker='o')
+plt.plot(val_accuracies, label='Validation Accuracy', marker='o')
+plt.title('Accuracy per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+# ----------------------------
+# FINAL TEST RESULT
+# ----------------------------
+print(f"\n✅ Final Test Accuracy: {val_accuracies[-1]:.4f}")
