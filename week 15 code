@@ -1,0 +1,37 @@
+# ==========================================
+# YOLOv8 OBJECT DETECTION USING PYTORCH
+# ==========================================
+
+from ultralytics import YOLO
+import torch
+
+# Check GPU availability
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print("Using device:", device)
+
+# ----------------------------------------
+# 1️⃣ LOAD A PRETRAINED YOLO MODEL
+# ----------------------------------------
+# 'yolov8n.pt' = nano (fastest)
+# 'yolov8s.pt' = small
+# 'yolov8m.pt' = medium
+# 'yolov8l.pt' = large
+# 'yolov8x.pt' = extra large
+model = YOLO('yolov8s.pt')  # Pretrained on COCO dataset (80 classes)
+
+# ----------------------------------------
+# 2️⃣ RUN INFERENCE ON AN IMAGE
+# ----------------------------------------
+# You can replace with your own image path or URL
+results = model.predict(source='https://ultralytics.com/images/bus.jpg', show=True, conf=0.5)
+
+# ----------------------------------------
+# 3️⃣ PRINT DETECTION RESULTS
+# ----------------------------------------
+for result in results:
+    boxes = result.boxes
+    for box in boxes:
+        cls = int(box.cls[0])
+        conf = float(box.conf[0])
+        xyxy = box.xyxy[0].tolist()
+        print(f"Detected {model.names[cls]} ({conf:.2f}) at {xyxy}")
