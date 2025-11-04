@@ -1,0 +1,104 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+
+url = "https://raw.githubusercontent.com/jbrownlee/Datasets/master/daily-min-temperatures.csv"
+data = pd.read_csv(url, parse_dates=['Date'], index_col='Date')
+temps = data['Temp'].values.reshape(-1, 1)
+
+
+scaler = MinMaxScaler(feature_range=(0, 1))
+temps_scaled = scaler.fit_transform(temps)
+
+seq_length = 10
+X, Y = [], []
+for i in range(len(temps_scaled) - seq_length):
+    X.append(temps_scaled[i:i+seq_length])
+    Y.append(temps_scaled[i+seq_length])
+X = np.array(X)
+Y = np.array(Y)
+
+X = torch.tensor(X, dtype=torch.float32)
+Y = torch.tensor(Y, dtype=torch.float32)
+
+class RNNModel(nn.Module):
+    def __init__(self, input_size=1, hidden_size=50, output_size=1):
+        super(RNNModel, self).__init__()
+        self.rnn = nn.RNN(input_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
+    def forward(self, x):
+        out, _ = self.rnn(x)
+        out = self.fc(out[:, -1, :])
+        return out
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size=1, hidden_size=50, output_size=1):
+        super(LSTMModel, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = self.fc(out[:, -1, :])
+        return out
+
+rnn_model = RNNModel()
+lstm_model = LSTMModel()
+
+criterion = nn.MSELoss()
+rnn_optimizer = torch.optim.Adam(rnn_model.parameters(), lr=0.01)
+lstm_optimizer = torch.optim.Adam(lstm_model.parameters(), lr=0.01)
+
+
+def train_model(model, optimizer, X, Y, epochs=30):
+    losses = []
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        output = model(X)
+        loss = criterion(output, Y)
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+        if (epoch+1) % 5 == 0:
+            print(f"Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.6f}")
+    return losses
+
+
+print("Training RNN...")
+rnn_losses = train_model(rnn_model, rnn_optimizer, X, Y)
+
+print("\nTraining LSTM...")
+lstm_losses = train_model(lstm_model, lstm_optimizer, X, Y)
+
+
+def get_predictions(model, X):
+    model.eval()
+    with torch.no_grad():
+        preds = model(X).numpy()
+    return scaler.inverse_transform(preds)
+
+rnn_preds = get_predictions(rnn_model, X)
+lstm_preds = get_predictions(lstm_model, X)
+Y_rescaled = scaler.inverse_transform(Y.numpy())
+
+
+plt.figure(figsize=(8,4))
+plt.plot(rnn_losses, label='RNN Loss')
+plt.plot(lstm_losses, label='LSTM Loss')
+plt.title("Training Loss Comparison")
+plt.xlabel("Epochs")
+plt.ylabel("Loss")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(10,5))
+plt.plot(Y_rescaled, label='Actual')
+plt.plot(rnn_preds, label='RNN Predicted')
+plt.plot(lstm_preds, label='LSTM Predicted')
+plt.title("RNN vs LSTM Predictions (Daily Min Temperatures)")
+plt.xlabel("Days")
+plt.ylabel("Temperature (°C)")
+plt.legend()
+plt.show()
